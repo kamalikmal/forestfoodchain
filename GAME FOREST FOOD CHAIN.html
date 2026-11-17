@@ -1,0 +1,912 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Labirin Rantai Makanan</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, Arial, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #101d19; color: #f5f8ed; }
+    .app { width: min(1100px, 100%); margin: auto; padding: 14px; }
+    h1 { margin: 0 0 5px; font-size: clamp(1.3rem, 3vw, 2rem); }
+    .subtitle { margin: 0 0 12px; color: #c8d9c6; }
+
+    .hud { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 10px; align-items: center; }
+    .pill { padding: 8px 12px; border-radius: 12px; background: #263e32; font-weight: 700; }
+    .hud button { min-height: 38px; padding: 6px 14px; }
+
+    .stage { position: relative; overflow: hidden; border: 3px solid #82ae69; border-radius: 18px; background: #1d4a2b; }
+    canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; touch-action: none; }
+
+    .overlay {
+      position: absolute; inset: 0; display: grid; place-items: center;
+      padding: 14px; background: #10231cd9; text-align: center; overflow: auto;
+    }
+    .overlay[hidden], .tv-controls[hidden] { display: none; }
+    .card {
+      width: min(640px, 100%); padding: 20px; border-radius: 18px;
+      background: #203c2d; box-shadow: 0 12px 35px #0006;
+    }
+    .card h2 { margin-top: 0; }
+    .card p { line-height: 1.5; }
+
+    button {
+      min-height: 46px; padding: 10px 17px; border: 0; border-radius: 12px;
+      background: #f5ca55; color: #292511; font: inherit; font-weight: 800;
+      cursor: pointer; touch-action: manipulation;
+    }
+    button.secondary { background: #3c6b4f; color: #f5f8ed; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button:focus-visible { outline: 3px solid white; outline-offset: 3px; }
+
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 14px; }
+
+    .levels { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 8px; margin: 14px 0; }
+    .lvl {
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      background: #2f5a40; color: #f5f8ed; min-height: 84px; font-size: .9rem;
+    }
+    .lvl .big { font-size: 1.8rem; }
+    .lvl small { font-weight: 700; font-size: .8rem; color: #ffe59a; }
+
+    .chain { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+    .chain .node { background: #2f5a40; border-radius: 14px; padding: 8px 10px; min-width: 96px; }
+    .chain .node b { display: block; font-size: 2rem; }
+    .chain .node span { display: block; font-size: .78rem; color: #cfe3c9; }
+    .chain .arrow { font-size: 1.3rem; color: #f5ca55; font-weight: 900; }
+    .chain.mini { margin: 6px 0; gap: 4px; font-size: 1.4rem; }
+
+    .stars { font-size: 2.1rem; letter-spacing: 4px; color: #ffd84f; }
+    .fact {
+      background: #183024; border-left: 4px solid #f5ca55; padding: 8px 12px;
+      border-radius: 8px; text-align: left; font-size: .92rem; line-height: 1.5;
+    }
+
+    .bottom { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 12px; margin-top: 12px; }
+    .help { max-width: 650px; margin: 0; line-height: 1.5; color: #d7e3d3; }
+    .tv-controls { display: grid; grid-template-columns: repeat(3, 56px); gap: 5px; justify-content: center; user-select: none; }
+    .tv-controls button { min-height: 50px; padding: 4px; }
+    .tv-controls .empty { visibility: hidden; }
+
+    @media (max-width: 700px) {
+      .app { padding: 9px; }
+      .pill { font-size: .84rem; padding: 6px 9px; }
+      .overlay { position: fixed; z-index: 10; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <h1>🌳 Labirin Rantai Makanan</h1>
+    <p class="subtitle">Gambar jalan untuk tokohmu: makan semua makanannya, hindari predator, lalu pulang ke sarang!</p>
+
+    <div class="hud" aria-live="polite">
+      <span class="pill" id="levelLabel">Level 1 / 7</span>
+      <span class="pill" id="animalLabel">🐇 Kelinci</span>
+      <span class="pill" id="foodLabel">🥕 0 / 0</span>
+      <span class="pill" id="livesLabel">❤️❤️❤️</span>
+      <span class="pill" id="timerLabel">⏱️ —</span>
+      <span class="pill" id="scoreLabel">Skor: 0</span>
+      <button id="pauseButton" class="secondary" aria-label="Jeda">⏸ Jeda</button>
+    </div>
+
+    <div class="stage">
+      <canvas id="game" width="1920" height="1080"
+        aria-label="Labirin hutan: gambar jalan dari tokohmu menuju makanan lalu ke sarang"></canvas>
+      <div class="overlay" id="overlay">
+        <div class="card" id="card"></div>
+      </div>
+    </div>
+
+    <div class="bottom">
+      <p class="help">
+        <b>Sentuh/klik tokohmu lalu seret</b> di sepanjang lorong untuk menggambar jalan, dan tokoh akan mengikutinya.
+        Kamu juga bisa memakai <b>tombol panah / WASD</b> atau remote TV untuk menggerakkan tokoh langsung.
+        <b>Spasi / P / Esc</b> untuk jeda. Sarang baru terbuka 🔓 setelah semua makanan habis dimakan.
+      </p>
+      <div class="tv-controls" id="tvControls" hidden aria-label="Kontrol arah di layar">
+        <span class="empty"></span>
+        <button data-dir="up" aria-label="Atas">▲</button>
+        <span class="empty"></span>
+        <button data-dir="left" aria-label="Kiri">◀</button>
+        <button id="padPause" aria-label="Jeda">⏸</button>
+        <button data-dir="right" aria-label="Kanan">▶</button>
+        <span class="empty"></span>
+        <button data-dir="down" aria-label="Bawah">▼</button>
+        <span class="empty"></span>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  (() => {
+    "use strict";
+
+    /* ================== SETUP DASAR ================== */
+    const SCALE = 2, W = 960, H = 540, TAU = Math.PI * 2;
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const overlay = document.getElementById("overlay");
+    const card = document.getElementById("card");
+    const tvControls = document.getElementById("tvControls");
+    const ui = {
+      level: document.getElementById("levelLabel"),
+      animal: document.getElementById("animalLabel"),
+      food: document.getElementById("foodLabel"),
+      lives: document.getElementById("livesLabel"),
+      timer: document.getElementById("timerLabel"),
+      score: document.getElementById("scoreLabel"),
+      pause: document.getElementById("pauseButton")
+    };
+
+    const PLAYER_SPEED = 4.4;   // petak per detik
+    const BOOST_SPEED = 6.4;
+    const MAX_LIVES = 3;
+
+    const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+    const OPP = { up: "down", down: "up", left: "right", right: "left" };
+    const DKEYS = Object.keys(DIRS);
+
+    /* ================== DESAIN LEVEL (RANTAI MAKANAN) ==================
+       Setiap level punya tokoh, makanan, dan predator yang berbeda. */
+    const LEVELS = [
+      { animal: "Kelinci", emoji: "🐇", food: "Wortel", foodEmoji: "🥕", predator: "Ular", predatorEmoji: "🐍",
+        home: "Liang", homeEmoji: "🕳️", roles: ["Produsen", "Konsumen I", "Konsumen II"], color: "#ff9f43",
+        cols: 19, rows: 11, foods: 6, waters: 1, preds: 1, predSpeed: 2.3, chase: 0.35, sight: 6, braid: 0.18, time: 90,
+        fact: "Kelinci adalah herbivora (pemakan tumbuhan). Ular memangsa kelinci, terutama anak kelinci yang lengah." },
+      { animal: "Ulat", emoji: "🐛", food: "Daun", foodEmoji: "🍃", predator: "Burung", predatorEmoji: "🐦",
+        home: "Kepompong", homeEmoji: "🍂", roles: ["Produsen", "Konsumen I", "Konsumen II"], color: "#9be15d",
+        cols: 21, rows: 11, foods: 7, waters: 1, preds: 1, predSpeed: 2.6, chase: 0.45, sight: 7, braid: 0.18, time: 95,
+        fact: "Ulat makan banyak daun agar cukup energi untuk menjadi kupu-kupu. Burung pemakan serangga suka sekali memangsa ulat." },
+      { animal: "Tikus", emoji: "🐁", food: "Biji-bijian", foodEmoji: "🌾", predator: "Burung Hantu", predatorEmoji: "🦉",
+        home: "Lubang Tanah", homeEmoji: "🕳️", roles: ["Produsen", "Konsumen I", "Konsumen II"], color: "#f5ca55",
+        cols: 21, rows: 13, foods: 8, waters: 1, preds: 2, predSpeed: 2.6, chase: 0.45, sight: 8, braid: 0.2, time: 105,
+        fact: "Burung hantu berburu di malam hari dan bisa terbang hampir tanpa suara. Itulah sebabnya tikus harus selalu waspada." },
+      { animal: "Belalang", emoji: "🦗", food: "Rumput Muda", foodEmoji: "🌱", predator: "Katak", predatorEmoji: "🐸",
+        home: "Semak Bunga", homeEmoji: "🌼", roles: ["Produsen", "Konsumen I", "Konsumen II"], color: "#7bed9f",
+        cols: 23, rows: 13, foods: 8, waters: 1, preds: 2, predSpeed: 2.8, chase: 0.55, sight: 9, braid: 0.2, time: 110,
+        fact: "Katak menangkap belalang dengan lidahnya yang panjang dan lengket, hanya dalam sekejap mata!" },
+      { animal: "Katak", emoji: "🐸", food: "Nyamuk", foodEmoji: "🦟", predator: "Ular", predatorEmoji: "🐍",
+        home: "Kolam", homeEmoji: "🌊", roles: ["Konsumen I", "Konsumen II", "Konsumen III"], color: "#2ed573",
+        cols: 25, rows: 15, foods: 9, waters: 2, preds: 2, predSpeed: 3.0, chase: 0.6, sight: 10, braid: 0.22, time: 120,
+        fact: "Katak membantu mengendalikan jumlah nyamuk di hutan. Namun katak sendiri adalah santapan favorit ular." },
+      { animal: "Tupai", emoji: "🐿️", food: "Kacang", foodEmoji: "🌰", predator: "Elang", predatorEmoji: "🦅",
+        home: "Lubang Pohon", homeEmoji: "🌳", roles: ["Produsen", "Konsumen I", "Konsumen II"], color: "#e17055",
+        cols: 27, rows: 15, foods: 10, waters: 2, preds: 3, predSpeed: 3.1, chase: 0.65, sight: 11, braid: 0.22, time: 130,
+        fact: "Tupai sering mengubur kacang lalu lupa di mana menyimpannya. Kacang itu bisa tumbuh menjadi pohon baru!" },
+      { animal: "Rusa", emoji: "🦌", food: "Rumput", foodEmoji: "🌿", predator: "Harimau", predatorEmoji: "🐅",
+        home: "Padang Aman", homeEmoji: "🏞️", roles: ["Produsen", "Konsumen I", "Konsumen II (Puncak)"], color: "#fdcb6e",
+        cols: 29, rows: 17, foods: 11, waters: 2, preds: 3, predSpeed: 3.3, chase: 0.72, sight: 13, braid: 0.24, time: 145,
+        fact: "Harimau adalah predator puncak, yaitu tidak ada hewan lain yang memangsanya. Predator puncak menjaga jumlah rusa agar hutan tidak gundul." }
+    ];
+
+    /* ================== PROGRES (localStorage) ================== */
+    const SAVE_KEY = "labirinRantaiMakanan_v1";
+    let progress = { unlocked: 1, stars: Array(LEVELS.length).fill(0), best: Array(LEVELS.length).fill(0) };
+    try {
+      const s = JSON.parse(localStorage.getItem(SAVE_KEY));
+      if (s && Array.isArray(s.stars) && Array.isArray(s.best)) progress = { ...progress, ...s };
+    } catch (e) { /* abaikan */ }
+    function saveProgress() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(progress)); } catch (e) {} }
+
+    /* ================== STATE ================== */
+    let state = "menu";          // menu | intro | play | paused | result
+    let levelIndex = 0, L = null;
+    let grid = [], COLS = 0, ROWS = 0, T = 30, OX = 0, OY = 0;
+    let start, home, player, preds = [], items = [];
+    let foodTotal = 0, foodLeft = 0, lives = MAX_LIVES, timeLeft = 0, levelScore = 0;
+    let invuln = 0, boost = 0, shake = 0;
+    let path = [], drawingPath = false;
+    let distField = null;
+    let floats = [];
+    let bg = null;
+    let lastTime = performance.now();
+    let hudCache = {};
+
+    /* ================== AUDIO SEDERHANA ================== */
+    let actx = null;
+    function ensureAudio() {
+      if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+      if (actx && actx.state === "suspended") actx.resume();
+    }
+    function beep(freq, dur = 0.1, type = "sine", vol = 0.07, delay = 0) {
+      if (!actx) return;
+      const t0 = actx.currentTime + delay;
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type; o.frequency.setValueAtTime(freq, t0);
+      g.gain.setValueAtTime(vol, t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g).connect(actx.destination);
+      o.start(t0); o.stop(t0 + dur + 0.02);
+    }
+    const sfx = {
+      eat: () => { beep(660, 0.07, "square", 0.05); beep(990, 0.08, "square", 0.05, 0.06); },
+      water: () => { beep(520, 0.1, "sine", 0.08); beep(780, 0.15, "sine", 0.08, 0.08); },
+      unlock: () => [523, 659, 784].forEach((f, i) => beep(f, 0.12, "triangle", 0.08, i * 0.09)),
+      hit: () => { beep(220, 0.25, "sawtooth", 0.08); beep(140, 0.35, "sawtooth", 0.07, 0.12); },
+      win: () => [523, 659, 784, 1047].forEach((f, i) => beep(f, 0.18, "triangle", 0.09, i * 0.12)),
+      lose: () => [392, 330, 262].forEach((f, i) => beep(f, 0.25, "sine", 0.08, i * 0.18))
+    };
+
+    /* ================== UTILITAS ================== */
+    const isOpen = (x, y) => x >= 0 && y >= 0 && x < COLS && y < ROWS && grid[y][x] === 0;
+    const px = x => OX + (x + 0.5) * T;
+    const py = y => OY + (y + 0.5) * T;
+    const starStr = n => "★".repeat(n) + "☆".repeat(3 - n);
+    function shuffle(a) {
+      for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; }
+      return a;
+    }
+
+    /* ================== GENERATOR LABIRIN ================== */
+    function genMaze(cols, rows, braid) {
+      const g = Array.from({ length: rows }, () => Array(cols).fill(1));
+      const stack = [[1, 1]];
+      g[1][1] = 0;
+      while (stack.length) {
+        const [x, y] = stack[stack.length - 1];
+        const nb = [[2, 0], [-2, 0], [0, 2], [0, -2]]
+          .map(([dx, dy]) => [x + dx, y + dy, dx, dy])
+          .filter(([nx, ny]) => nx > 0 && ny > 0 && nx < cols - 1 && ny < rows - 1 && g[ny][nx] === 1);
+        if (!nb.length) { stack.pop(); continue; }
+        const [nx, ny, dx, dy] = nb[Math.random() * nb.length | 0];
+        g[y + dy / 2][x + dx / 2] = 0;
+        g[ny][nx] = 0;
+        stack.push([nx, ny]);
+      }
+      // Buka sebagian dinding agar ada jalur memutar untuk menghindari predator
+      for (let y = 1; y < rows - 1; y++) {
+        for (let x = 1; x < cols - 1; x++) {
+          if (g[y][x] !== 1 || Math.random() > braid) continue;
+          const h = g[y][x - 1] === 0 && g[y][x + 1] === 0 && g[y - 1][x] === 1 && g[y + 1][x] === 1;
+          const v = g[y - 1][x] === 0 && g[y + 1][x] === 0 && g[y][x - 1] === 1 && g[y][x + 1] === 1;
+          if (h || v) g[y][x] = 0;
+        }
+      }
+      return g;
+    }
+
+    function bfs(sx, sy) {
+      const d = new Int16Array(COLS * ROWS).fill(-1);
+      const q = [sy * COLS + sx];
+      d[q[0]] = 0;
+      for (let h = 0; h < q.length; h++) {
+        const k = q[h], x = k % COLS, y = (k / COLS) | 0;
+        for (const key of DKEYS) {
+          const nx = x + DIRS[key][0], ny = y + DIRS[key][1];
+          if (isOpen(nx, ny)) {
+            const nk = ny * COLS + nx;
+            if (d[nk] < 0) { d[nk] = d[k] + 1; q.push(nk); }
+          }
+        }
+      }
+      return d;
+    }
+
+    /* ================== ENTITAS BERGERAK ================== */
+    function makeMover(cx, cy, speed) {
+      return { fx: cx, fy: cy, tx: cx, ty: cy, x: cx, y: cy, moving: false, speed, flip: true, dir: null };
+    }
+    function setTarget(m, nx, ny) {
+      if (nx > m.tx) m.flip = true; else if (nx < m.tx) m.flip = false;
+      m.fx = m.tx; m.fy = m.ty; m.tx = nx; m.ty = ny; m.moving = true;
+    }
+    function stepMover(m, dt) {
+      if (!m.moving) return false;
+      const dx = m.tx - m.x, dy = m.ty - m.y, d = Math.hypot(dx, dy), s = m.speed * dt;
+      if (d <= s) {
+        m.x = m.tx; m.y = m.ty; m.fx = m.tx; m.fy = m.ty; m.moving = false;
+        return true;
+      }
+      m.x += dx / d * s; m.y += dy / d * s;
+      return false;
+    }
+
+    /* ================== SETUP LEVEL ================== */
+    function setupLevel(i) {
+      levelIndex = i; L = LEVELS[i];
+      COLS = L.cols; ROWS = L.rows;
+      grid = genMaze(COLS, ROWS, L.braid);
+      T = Math.min(W / COLS, H / ROWS);
+      OX = (W - COLS * T) / 2; OY = (H - ROWS * T) / 2;
+
+      const mid = Math.floor(ROWS / 2) | 1;
+      start = { x: 1, y: mid };
+      home = { x: COLS - 2, y: mid };
+
+      const dStart = bfs(start.x, start.y);
+      const cells = [];
+      let maxD = 0;
+      for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+        if (grid[y][x] === 0) { const d = dStart[y * COLS + x]; cells.push({ x, y, d }); maxD = Math.max(maxD, d); }
+      }
+      shuffle(cells);
+
+      items = [];
+      const blocked = (x, y, min) =>
+        (x === start.x && y === start.y) || (x === home.x && y === home.y) ||
+        items.some(it => Math.abs(it.x - x) + Math.abs(it.y - y) < min);
+
+      const place = (kind, count) => {
+        for (const min of [4, 3, 2, 1]) {
+          for (const c of cells) {
+            if (items.filter(it => it.kind === kind).length >= count) return;
+            if (c.d >= 3 && !blocked(c.x, c.y, min)) items.push({ kind, x: c.x, y: c.y, taken: false, phase: Math.random() * TAU });
+          }
+        }
+      };
+      place("food", L.foods);
+      place("water", L.waters);
+
+      preds = [];
+      const minPredD = Math.max(8, Math.floor(maxD * 0.45));
+      for (const c of cells) {
+        if (preds.length >= L.preds) break;
+        if (c.d < minPredD) continue;
+        if (Math.abs(c.x - home.x) + Math.abs(c.y - home.y) < 2) continue;
+        if (preds.some(p => Math.abs(p.sx - c.x) + Math.abs(p.sy - c.y) < 5)) continue;
+        const p = makeMover(c.x, c.y, L.predSpeed);
+        p.sx = c.x; p.sy = c.y; p.chasing = false;
+        preds.push(p);
+      }
+
+      foodTotal = items.filter(it => it.kind === "food").length;
+      foodLeft = foodTotal;
+      lives = MAX_LIVES; timeLeft = L.time; levelScore = 0;
+      invuln = 0; boost = 0; shake = 0;
+      player = makeMover(start.x, start.y, PLAYER_SPEED);
+      player.wantDir = null;
+      path = []; drawingPath = false; floats = [];
+      distField = bfs(start.x, start.y);
+      buildBackground();
+      hudCache = {};
+      updateHud();
+    }
+
+    /* ================== LATAR HUTAN (prerender) ================== */
+    function buildBackground() {
+      bg = document.createElement("canvas");
+      bg.width = W * SCALE; bg.height = H * SCALE;
+      const b = bg.getContext("2d");
+      b.scale(SCALE, SCALE);
+      const grd = b.createLinearGradient(0, 0, 0, H);
+      grd.addColorStop(0, "#1d4a2b"); grd.addColorStop(1, "#143520");
+      b.fillStyle = grd; b.fillRect(0, 0, W, H);
+
+      const walls = [];
+      for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+        const X = OX + x * T, Y = OY + y * T;
+        if (grid[y][x] === 0) {
+          b.fillStyle = (x + y) % 2 ? "#a5cf7c" : "#9cc873";
+          b.fillRect(X, Y, T + 0.6, T + 0.6);
+          if (Math.random() < 0.2) {
+            b.fillStyle = ["#fff6a8", "#ffffff", "#f7a8c8", "#7fb25c"][Math.random() * 4 | 0];
+            b.beginPath(); b.arc(X + Math.random() * T, Y + Math.random() * T, T * 0.05, 0, TAU); b.fill();
+          }
+        } else walls.push({ cx: X + T / 2, cy: Y + T / 2, alt: Math.random() < 0.5, berry: Math.random() < 0.08 });
+      }
+      for (const w of walls) { b.fillStyle = "rgba(8,28,14,.45)"; b.beginPath(); b.arc(w.cx + T * 0.08, w.cy + T * 0.12, T * 0.62, 0, TAU); b.fill(); }
+      for (const w of walls) { b.fillStyle = w.alt ? "#2c6a38" : "#337a3f"; b.beginPath(); b.arc(w.cx, w.cy, T * 0.6, 0, TAU); b.fill(); }
+      for (const w of walls) {
+        b.fillStyle = "#4f9e52"; b.beginPath(); b.arc(w.cx - T * 0.16, w.cy - T * 0.18, T * 0.3, 0, TAU); b.fill();
+        b.fillStyle = "#6cbb62"; b.beginPath(); b.arc(w.cx - T * 0.22, w.cy - T * 0.24, T * 0.12, 0, TAU); b.fill();
+        if (w.berry) { b.fillStyle = "#e84a5f"; b.beginPath(); b.arc(w.cx + T * 0.2, w.cy + T * 0.1, T * 0.08, 0, TAU); b.fill(); }
+      }
+    }
+
+    /* ================== HUD ================== */
+    function setText(el, key, val) { if (hudCache[key] !== val) { hudCache[key] = val; el.textContent = val; } }
+    function updateHud() {
+      if (!L) return;
+      setText(ui.level, "lv", `Level ${levelIndex + 1} / ${LEVELS.length}`);
+      setText(ui.animal, "an", `${L.emoji} ${L.animal}`);
+      setText(ui.food, "fd", `${L.foodEmoji} ${foodTotal - foodLeft} / ${foodTotal}`);
+      setText(ui.lives, "lf", "❤️".repeat(Math.max(0, lives)) + "🤍".repeat(MAX_LIVES - Math.max(0, lives)));
+      setText(ui.timer, "tm", state === "play" || state === "paused" ? `⏱️ ${Math.ceil(timeLeft)} dtk` : "⏱️ —");
+      setText(ui.score, "sc", `Skor: ${levelScore}`);
+    }
+
+    /* ================== KARTU / LAYAR ================== */
+    function showCard(html, buttons = []) {
+      card.innerHTML = html;
+      const row = document.createElement("div");
+      row.className = "btn-row";
+      buttons.forEach(b => {
+        const el = document.createElement("button");
+        el.textContent = b.label;
+        if (b.secondary) el.classList.add("secondary");
+        el.addEventListener("click", () => { ensureAudio(); b.action(); });
+        row.appendChild(el);
+      });
+      card.appendChild(row);
+      overlay.hidden = false;
+      tvControls.hidden = true;
+      setTimeout(() => { const f = row.querySelector("button"); if (f) f.focus(); }, 30);
+    }
+
+    function chainHtml(lv) {
+      return `<div class="chain">
+        <div class="node"><b>${lv.foodEmoji}</b>${lv.food}<span>${lv.roles[0]}</span></div>
+        <div class="arrow">➜</div>
+        <div class="node"><b>${lv.emoji}</b>${lv.animal}<span>${lv.roles[1]} · KAMU</span></div>
+        <div class="arrow">➜</div>
+        <div class="node"><b>${lv.predatorEmoji}</b>${lv.predator}<span>${lv.roles[2]}</span></div>
+      </div>`;
+    }
+
+    function showMenu() {
+      state = "menu";
+      const totalBest = progress.best.reduce((a, b) => a + b, 0);
+      const next = Math.min(progress.unlocked, LEVELS.length) - 1;
+      showCard(`
+        <h2>🌳 Labirin Rantai Makanan</h2>
+        <p>Di setiap level kamu menjadi hewan yang berbeda dalam rantai makanan hutan.
+        <b>Gambar jalan</b> dari tokohmu, makan semua makanannya (+10), minum air 💧 (+20 & lari cepat),
+        lalu pulang ke sarang. Awas predator! Tertangkap = nyawa berkurang.</p>
+        <div class="levels" id="levelGrid"></div>
+        <p>Total skor terbaik: <b>${totalBest}</b></p>`,
+        [
+          { label: `▶ Main Level ${next + 1}`, action: () => showLevelIntro(next) },
+          { label: "↺ Reset progres", secondary: true, action: () => {
+              if (confirm("Hapus semua progres & bintang?")) {
+                progress = { unlocked: 1, stars: Array(LEVELS.length).fill(0), best: Array(LEVELS.length).fill(0) };
+                saveProgress(); showMenu();
+              }
+            } }
+        ]);
+      const lg = card.querySelector("#levelGrid");
+      LEVELS.forEach((lv, i) => {
+        const b = document.createElement("button");
+        const locked = i >= progress.unlocked;
+        b.className = "lvl"; b.disabled = locked;
+        b.innerHTML = `<span class="big">${locked ? "🔒" : lv.emoji}</span>Level ${i + 1}<small>${locked ? "Terkunci" : starStr(progress.stars[i])}</small>`;
+        b.addEventListener("click", () => { ensureAudio(); showLevelIntro(i); });
+        lg.appendChild(b);
+      });
+    }
+
+    function showLevelIntro(i) {
+      setupLevel(i);
+      state = "intro";
+      showCard(`
+        <h2>Level ${i + 1}: ${L.emoji} ${L.animal}</h2>
+        ${chainHtml(L)}
+        <p>Makan <b>${foodTotal} ${L.foodEmoji} ${L.food}</b>, hindari <b>${preds.length} ${L.predatorEmoji} ${L.predator}</b>,
+        lalu pulang ke <b>${L.homeEmoji} ${L.home}</b> sebelum <b>${L.time} detik</b> habis.</p>
+        <p class="fact">💡 ${L.fact}</p>`,
+        [
+          { label: "▶ Mulai!", action: startPlay },
+          { label: "🏠 Menu", secondary: true, action: showMenu }
+        ]);
+    }
+
+    function startPlay() {
+      state = "play";
+      overlay.hidden = true;
+      tvControls.hidden = false;
+      lastTime = performance.now();
+      hudCache = {};
+      updateHud();
+    }
+
+    function pauseGame() {
+      if (state !== "play") return;
+      state = "paused";
+      drawingPath = false;
+      showCard(`<h2>⏸ Jeda</h2><p>${L.emoji} ${L.animal} sedang bersembunyi sebentar…</p>`, [
+        { label: "▶ Lanjut", action: resumeGame },
+        { label: "↻ Ulangi level", secondary: true, action: () => { setupLevel(levelIndex); startPlay(); } },
+        { label: "🏠 Menu", secondary: true, action: showMenu }
+      ]);
+    }
+    function resumeGame() { if (state === "paused") startPlay(); }
+
+    function winLevel() {
+      state = "result";
+      sfx.win();
+      const timeBonus = Math.ceil(timeLeft) * 2;
+      const lifeBonus = lives * 30;
+      const total = levelScore + timeBonus + lifeBonus;
+      const stars = lives === MAX_LIVES && timeLeft >= L.time * 0.35 ? 3 : lives >= 2 ? 2 : 1;
+      const i = levelIndex;
+      progress.stars[i] = Math.max(progress.stars[i], stars);
+      progress.best[i] = Math.max(progress.best[i], total);
+      progress.unlocked = Math.min(LEVELS.length, Math.max(progress.unlocked, i + 2));
+      saveProgress();
+      updateHud();
+
+      const isLast = i === LEVELS.length - 1;
+      showCard(`
+        <h2>${L.homeEmoji} ${L.animal} selamat sampai di ${L.home}!</h2>
+        <div class="stars">${starStr(stars)}</div>
+        <p>${L.foodEmoji} Makanan & 💧 air: <b>${levelScore}</b><br>
+        ⏱️ Bonus waktu (${Math.ceil(timeLeft)} dtk × 2): <b>${timeBonus}</b><br>
+        ❤️ Bonus nyawa (${lives} × 30): <b>${lifeBonus}</b></p>
+        <p style="font-size:1.2rem">Skor level: <b>${total}</b> · Terbaik: <b>${progress.best[i]}</b></p>`,
+        [
+          isLast
+            ? { label: "🎉 Lihat rantai makanan", action: showFinal }
+            : { label: `➜ Level ${i + 2}: ${LEVELS[i + 1].emoji} ${LEVELS[i + 1].animal}`, action: () => showLevelIntro(i + 1) },
+          { label: "↻ Ulangi", secondary: true, action: () => showLevelIntro(i) },
+          { label: "🏠 Menu", secondary: true, action: showMenu }
+        ]);
+    }
+
+    function loseLevel(reason) {
+      state = "result";
+      sfx.lose();
+      updateHud();
+      const msg = reason === "time"
+        ? `⌛ Hari mulai gelap! ${L.emoji} ${L.animal} belum sampai di ${L.home}.`
+        : `${L.predatorEmoji} ${L.animal} tertangkap ${L.predator}!`;
+      const tip = reason === "time"
+        ? "Tips: gambar jalan yang panjang sekaligus agar tokohmu tidak berhenti-henti."
+        : `Tips: tanda <b style="color:#ff6b6b">!</b> di atas ${L.predator} berarti ia sedang mengejarmu. Cari jalan memutar!`;
+      showCard(`<h2>${msg}</h2><p>Begitulah rantai makanan di alam liar. ${tip}</p>`, [
+        { label: "↻ Coba lagi", action: () => { setupLevel(levelIndex); startPlay(); } },
+        { label: "🏠 Menu", secondary: true, action: showMenu }
+      ]);
+    }
+
+    function showFinal() {
+      state = "result";
+      const totalBest = progress.best.reduce((a, b) => a + b, 0);
+      const rows = LEVELS.map(lv =>
+        `<div class="chain mini">${lv.foodEmoji} ➜ ${lv.emoji} ➜ ${lv.predatorEmoji}</div>`).join("");
+      showCard(`
+        <h2>🎉 Semua rantai makanan selesai!</h2>
+        ${rows}
+        <p class="fact">🍄 Saat tumbuhan dan hewan mati, <b>pengurai</b> (jamur & bakteri) mengubahnya menjadi
+        unsur hara tanah. Tumbuhan menyerapnya lagi, dan rantai makanan pun terus berputar.</p>
+        <p style="font-size:1.2rem">Total skor terbaik: <b>${totalBest}</b></p>`,
+        [
+          { label: "↻ Main lagi dari Level 1", action: () => showLevelIntro(0) },
+          { label: "🏠 Menu", secondary: true, action: showMenu }
+        ]);
+    }
+
+    /* ================== GAMBAR JALAN (ala Mouse Maze) ================== */
+    function pathLast() { return path.length ? path[path.length - 1] : { x: player.tx, y: player.ty }; }
+
+    function shortSeg(from, tx, ty, maxD) {
+      if (Math.abs(from.x - tx) + Math.abs(from.y - ty) > maxD) return null;
+      const key = (x, y) => y * COLS + x;
+      const startK = key(from.x, from.y);
+      const prev = new Map([[startK, -1]]);
+      const q = [[from.x, from.y, 0]];
+      for (let h = 0; h < q.length; h++) {
+        const [x, y, d] = q[h];
+        if (x === tx && y === ty) {
+          const out = [];
+          let k = key(x, y);
+          while (k !== startK) { out.push({ x: k % COLS, y: (k / COLS) | 0 }); k = prev.get(k); }
+          return out.reverse();
+        }
+        if (d >= maxD) continue;
+        for (const dk of DKEYS) {
+          const nx = x + DIRS[dk][0], ny = y + DIRS[dk][1], nk = key(nx, ny);
+          if (isOpen(nx, ny) && !prev.has(nk)) { prev.set(nk, key(x, y)); q.push([nx, ny, d + 1]); }
+        }
+      }
+      return null;
+    }
+
+    function extendPath(cx, cy) {
+      if (!isOpen(cx, cy)) return;
+      const last = pathLast();
+      if (last.x === cx && last.y === cy) return;
+      const prev = path.length >= 2 ? path[path.length - 2] : (path.length === 1 ? { x: player.tx, y: player.ty } : null);
+      if (prev && prev.x === cx && prev.y === cy) { path.pop(); return; }   // mundur = hapus
+      const seg = shortSeg(last, cx, cy, 4);
+      if (!seg) return;
+      path.push(...seg);
+      if (path.length > 250) path.length = 250;
+    }
+
+    function canvasPoint(e) {
+      const r = canvas.getBoundingClientRect();
+      return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
+    }
+    const toTile = pt => ({ ux: (pt.x - OX) / T - 0.5, uy: (pt.y - OY) / T - 0.5 });
+
+    canvas.addEventListener("pointerdown", e => {
+      if (state !== "play") return;
+      ensureAudio();
+      const { ux, uy } = toTile(canvasPoint(e));
+      const end = pathLast();
+      const nearEnd = path.length && Math.hypot(ux - end.x, uy - end.y) < 1.3;
+      const nearPlayer = Math.hypot(ux - player.x, uy - player.y) < 1.4;
+      if (nearEnd) {
+        drawingPath = true;
+      } else if (nearPlayer) {
+        path = []; drawingPath = true;
+        player.wantDir = null; player.dir = null;
+      } else {
+        floats.push({ text: `Mulai dari ${L.emoji}!`, x: px(ux), y: py(uy), life: 1, color: "#fff" });
+        return;
+      }
+      canvas.setPointerCapture(e.pointerId);
+      extendPath(Math.round(ux), Math.round(uy));
+    });
+    canvas.addEventListener("pointermove", e => {
+      if (state !== "play" || !drawingPath) return;
+      const { ux, uy } = toTile(canvasPoint(e));
+      extendPath(Math.round(ux), Math.round(uy));
+    });
+    const stopDraw = () => { drawingPath = false; };
+    canvas.addEventListener("pointerup", stopDraw);
+    canvas.addEventListener("pointercancel", stopDraw);
+
+    /* ================== KEYBOARD / REMOTE TV / D-PAD ================== */
+    function steer(dir) {
+      if (state !== "play") return;
+      path = []; drawingPath = false;
+      player.wantDir = dir;
+    }
+    document.addEventListener("keydown", e => {
+      const map = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+                    w: "up", s: "down", a: "left", d: "right", W: "up", S: "down", A: "left", D: "right" };
+      if (map[e.key] && state === "play") { e.preventDefault(); steer(map[e.key]); return; }
+      const onButton = e.target.tagName === "BUTTON";
+      if ((e.key === "p" || e.key === "P" || e.key === "Escape" || (e.code === "Space" && !onButton))) {
+        if (state === "play") { e.preventDefault(); pauseGame(); }
+        else if (state === "paused" && e.key !== " ") { e.preventDefault(); resumeGame(); }
+      }
+    });
+    document.querySelectorAll("[data-dir]").forEach(btn => {
+      btn.addEventListener("pointerdown", e => { e.preventDefault(); ensureAudio(); steer(btn.dataset.dir); });
+      btn.addEventListener("click", e => { if (e.detail === 0) steer(btn.dataset.dir); }); // aktivasi via keyboard/remote
+    });
+    document.getElementById("padPause").addEventListener("click", pauseGame);
+    ui.pause.addEventListener("click", () => { if (state === "play") pauseGame(); else if (state === "paused") resumeGame(); });
+    document.addEventListener("visibilitychange", () => { if (document.hidden) pauseGame(); });
+
+    /* ================== LOGIKA PERMAINAN ================== */
+    function choosePlayerNext() {
+      const cx = player.tx, cy = player.ty;
+      if (path.length) {
+        const n = path.shift();
+        if (isOpen(n.x, n.y) && Math.abs(n.x - cx) + Math.abs(n.y - cy) === 1) { setTarget(player, n.x, n.y); player.dir = null; }
+        else path = [];
+        return;
+      }
+      if (player.wantDir) {
+        const [dx, dy] = DIRS[player.wantDir];
+        if (isOpen(cx + dx, cy + dy)) { player.dir = player.wantDir; setTarget(player, cx + dx, cy + dy); return; }
+      }
+      if (player.dir) {
+        const [dx, dy] = DIRS[player.dir];
+        if (isOpen(cx + dx, cy + dy)) { setTarget(player, cx + dx, cy + dy); return; }
+        player.dir = null;
+      }
+    }
+
+    function onPlayerArrive() {
+      const cx = player.tx, cy = player.ty;
+      distField = bfs(cx, cy);
+      for (const it of items) {
+        if (it.taken || it.x !== cx || it.y !== cy) continue;
+        it.taken = true;
+        if (it.kind === "food") {
+          foodLeft--; levelScore += 10; sfx.eat();
+          floats.push({ text: `+10 ${L.foodEmoji}`, x: px(cx), y: py(cy) - T * 0.4, life: 1, color: "#fff176" });
+          if (foodLeft === 0) {
+            sfx.unlock();
+            floats.push({ text: `Kenyang! Pulang ke ${L.home} 🔓`, x: px(cx), y: py(cy) - T, life: 1.8, color: "#ffffff" });
+          }
+        } else {
+          levelScore += 20; boost = 4; sfx.water();
+          floats.push({ text: "+20 💧 Lari cepat!", x: px(cx), y: py(cy) - T * 0.4, life: 1.2, color: "#9dddf0" });
+        }
+      }
+      if (cx === home.x && cy === home.y && foodLeft === 0) winLevel();
+      else if (cx === home.x && cy === home.y && foodLeft > 0 && !player.toldLocked) {
+        player.toldLocked = true;
+        floats.push({ text: `Masih lapar! Sisa ${foodLeft} ${L.foodEmoji}`, x: px(cx), y: py(cy) - T * 0.5, life: 1.4, color: "#ffb3a7" });
+      }
+      if (!(cx === home.x && cy === home.y)) player.toldLocked = false;
+    }
+
+    function updatePlayer(dt) {
+      player.speed = boost > 0 ? BOOST_SPEED : PLAYER_SPEED;
+      // Berbalik arah di tengah jalan (kontrol panah)
+      if (player.moving && player.wantDir && !path.length) {
+        const [dx, dy] = DIRS[player.wantDir];
+        if (player.tx - player.fx === -dx && player.ty - player.fy === -dy) {
+          const tx = player.tx, ty = player.ty;
+          player.tx = player.fx; player.ty = player.fy; player.fx = tx; player.fy = ty;
+          if (dx) player.flip = dx > 0;
+          player.dir = player.wantDir;
+        }
+      }
+      if (stepMover(player, dt)) onPlayerArrive();
+      if (state === "play" && !player.moving) choosePlayerNext();
+    }
+
+    function choosePredNext(p) {
+      const cx = p.tx, cy = p.ty;
+      const opts = DKEYS.map(k => ({ k, x: cx + DIRS[k][0], y: cy + DIRS[k][1] })).filter(o => isOpen(o.x, o.y));
+      if (!opts.length) return;
+      const back = p.dir ? OPP[p.dir] : null;
+      let choices = opts.filter(o => o.k !== back);
+      if (!choices.length) choices = opts;
+      const df = o => distField ? distField[o.y * COLS + o.x] : 0;
+      const dHere = distField ? distField[cy * COLS + cx] : 999;
+      p.chasing = invuln <= 0 && dHere >= 0 && dHere <= L.sight;
+      let pick;
+      if (p.chasing && Math.random() < L.chase) pick = opts.reduce((a, b) => df(b) < df(a) ? b : a);
+      else pick = choices[Math.random() * choices.length | 0];
+      p.dir = pick.k;
+      setTarget(p, pick.x, pick.y);
+    }
+
+    function caught() {
+      lives--;
+      sfx.hit();
+      shake = 0.4;
+      floats.push({ text: `💥 Tertangkap ${L.predator}!`, x: px(player.x), y: py(player.y) - T * 0.5, life: 1.3, color: "#ff8a80" });
+      if (lives <= 0) { loseLevel("caught"); return; }
+      player = makeMover(start.x, start.y, PLAYER_SPEED);
+      player.wantDir = null;
+      path = []; drawingPath = false;
+      for (const p of preds) {
+        p.x = p.fx = p.tx = p.sx; p.y = p.fy = p.ty = p.sy;
+        p.moving = false; p.dir = null; p.chasing = false;
+      }
+      invuln = 2.2;
+      distField = bfs(start.x, start.y);
+    }
+
+    function update(dt) {
+      timeLeft -= dt;
+      if (timeLeft <= 0) { timeLeft = 0; loseLevel("time"); return; }
+      if (invuln > 0) invuln -= dt;
+      if (boost > 0) boost -= dt;
+
+      updatePlayer(dt);
+      if (state !== "play") return;
+
+      for (const p of preds) {
+        p.speed = L.predSpeed * (invuln > 0 ? 0.6 : 1);
+        if (stepMover(p, dt) || !p.moving) choosePredNext(p);
+        if (invuln <= 0 && Math.hypot(p.x - player.x, p.y - player.y) < 0.62) { caught(); break; }
+      }
+      updateHud();
+    }
+
+    /* ================== RENDER ================== */
+    function emoji(ch, x, y, size, flip = false) {
+      ctx.save();
+      ctx.translate(x, y);
+      if (flip) ctx.scale(-1, 1);
+      ctx.font = `${size}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(ch, 0, size * 0.06);
+      ctx.restore();
+    }
+    function shadow(x, y, r) {
+      ctx.fillStyle = "rgba(20,40,20,.28)";
+      ctx.beginPath(); ctx.ellipse(x, y + T * 0.32, r, r * 0.35, 0, 0, TAU); ctx.fill();
+    }
+
+    function drawHome(t) {
+      const x = px(home.x), y = py(home.y), open = foodLeft === 0;
+      ctx.fillStyle = open ? `rgba(255,220,90,${0.4 + 0.25 * Math.sin(t * 5)})` : "rgba(0,0,0,.22)";
+      ctx.beginPath(); ctx.arc(x, y, T * 0.58, 0, TAU); ctx.fill();
+      emoji(L.homeEmoji, x, y, T * 0.8);
+      if (!open) emoji("🔒", x + T * 0.3, y - T * 0.3, T * 0.4);
+    }
+
+    function drawItems(t) {
+      for (const it of items) {
+        if (it.taken) continue;
+        const x = px(it.x), y = py(it.y) + Math.sin(t * 3 + it.phase) * T * 0.07;
+        shadow(px(it.x), py(it.y), T * 0.25);
+        if (it.kind === "water") {
+          ctx.fillStyle = "rgba(157,221,240,.45)";
+          ctx.beginPath(); ctx.arc(x, y, T * 0.42, 0, TAU); ctx.fill();
+        }
+        emoji(it.kind === "food" ? L.foodEmoji : "💧", x, y, T * 0.68);
+      }
+    }
+
+    function drawPath(t) {
+      if (!path.length) return;
+      ctx.save();
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(px(player.x), py(player.y));
+      ctx.lineTo(px(player.tx), py(player.ty));
+      for (const c of path) ctx.lineTo(px(c.x), py(c.y));
+      ctx.strokeStyle = "rgba(25,45,25,.4)"; ctx.lineWidth = T * 0.42; ctx.stroke();
+      ctx.strokeStyle = L.color; ctx.lineWidth = T * 0.26; ctx.stroke();
+      ctx.setLineDash([T * 0.12, T * 0.24]);
+      ctx.lineDashOffset = -t * 30;
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = T * 0.08; ctx.stroke();
+      ctx.setLineDash([]);
+      const end = path[path.length - 1];
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(px(end.x), py(end.y), T * 0.2, 0, TAU); ctx.fill();
+      ctx.fillStyle = L.color;
+      ctx.beginPath(); ctx.arc(px(end.x), py(end.y), T * 0.13, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
+
+    function drawPreds(t) {
+      for (const p of preds) {
+        const x = px(p.x), y = py(p.y);
+        shadow(x, y, T * 0.32);
+        emoji(L.predatorEmoji, x, y + Math.sin(t * 8 + p.sx) * T * 0.03, T * 0.92, p.flip);
+        if (p.chasing) {
+          ctx.font = `900 ${T * 0.55}px system-ui, sans-serif`;
+          ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.lineWidth = 4; ctx.strokeStyle = "#fff"; ctx.strokeText("!", x, y - T * 0.62);
+          ctx.fillStyle = "#e53935"; ctx.fillText("!", x, y - T * 0.62);
+        }
+      }
+    }
+
+    function drawPlayer(t) {
+      const x = px(player.x), y = py(player.y);
+      if (!player.moving && !path.length && state === "play") {
+        ctx.strokeStyle = "rgba(255,255,255,.85)";
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(x, y, T * (0.58 + 0.1 * Math.sin(t * 6)), 0, TAU); ctx.stroke();
+      }
+      if (boost > 0) {
+        ctx.fillStyle = `rgba(120,210,255,${0.25 + 0.15 * Math.sin(t * 12)})`;
+        ctx.beginPath(); ctx.arc(x, y, T * 0.55, 0, TAU); ctx.fill();
+      }
+      if (invuln > 0 && Math.floor(t * 12) % 2) return;
+      shadow(x, y, T * 0.3);
+      const hop = player.moving ? Math.abs(Math.sin(t * 14)) * T * 0.08 : 0;
+      emoji(L.emoji, x, y - hop, T * 0.95, player.flip);
+    }
+
+    function drawFloats() {
+      for (const f of floats) {
+        ctx.globalAlpha = Math.max(0, Math.min(1, f.life));
+        ctx.font = `800 ${Math.max(14, T * 0.42)}px system-ui, sans-serif`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.lineWidth = 4; ctx.strokeStyle = "rgba(20,40,25,.85)";
+        ctx.strokeText(f.text, f.x, f.y);
+        ctx.fillStyle = f.color; ctx.fillText(f.text, f.x, f.y);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function render(t) {
+      ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+      ctx.fillStyle = "#1d4a2b"; ctx.fillRect(0, 0, W, H);
+      if (shake > 0) ctx.translate((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10);
+      if (bg) ctx.drawImage(bg, 0, 0, W, H);
+      if (!L) return;
+      emoji("🪨", px(start.x), py(start.y) + T * 0.28, T * 0.42);
+      drawHome(t);
+      drawItems(t);
+      drawPath(t);
+      drawPreds(t);
+      drawPlayer(t);
+      drawFloats();
+    }
+
+    /* ================== LOOP UTAMA ================== */
+    function frame(now) {
+      const dt = Math.min(0.05, (now - lastTime) / 1000) || 0;
+      lastTime = now;
+      if (state === "play") update(dt);
+      if (shake > 0) shake -= dt;
+      for (const f of floats) { f.life -= dt; f.y -= dt * 28; }
+      floats = floats.filter(f => f.life > 0);
+      render(now / 1000);
+      requestAnimationFrame(frame);
+    }
+
+    setupLevel(0);
+    showMenu();
+    requestAnimationFrame(frame);
+  })();
+  </script>
+</body>
+</html>
